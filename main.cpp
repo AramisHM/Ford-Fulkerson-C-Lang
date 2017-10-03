@@ -153,6 +153,10 @@ int get_cost(int* values, int n_vertices, int vertice_a, int vertice_b) {
 	return values[((n_vertices*vertice_a)+vertice_b)];
 }
 
+void set_cost(int* values, int n_vertices, int vertice_a, int vertice_b, int value) {
+	values[((n_vertices*vertice_a)+vertice_b)] = value;
+}
+
 unsigned long factorial(unsigned long f)
 {
     if ( f == 0 ) 
@@ -224,12 +228,75 @@ int *adjacent_vertices(ford_fulkerson_graph *g, int vertex_index, int *n_adja) {
 }
 
 /* returns 1 if the flow from a to b exists. otherwise return 0 if is reverse flow. Returns -1 if error. */
-int isForwardFlow(ford_fulkerson_graph *g, int a, int b) {
+int is_foreward_flow(ford_fulkerson_graph *g, int a, int b) {
 	return (get_cost(g->edges_capacities,g->n_vertices,a,b)>=0?1:0);
+}
+
+// returns the capacity value, regardless the direction
+int get_capacity_value(ford_fulkerson_graph *g, int a, int b) {
+	int val = get_cost(g->edges_capacities,g->n_vertices,a,b);
+	if (val < 0)
+		val = get_cost(g->edges_capacities,g->n_vertices,b,a);
+	return val;
+}
+// returns the flow value, regardless the direction
+int get_flow_value(ford_fulkerson_graph *g, int a, int b) {
+	int val = get_cost(g->edges_flow,g->n_vertices,a,b);
+	if (val < 0)
+		val = get_cost(g->edges_flow,g->n_vertices,b,a);
+	return val;
+}
+
+// determinates if the current path is valid, in other words, if there is no forward full, or backward empty edges.
+int valid_path(ford_fulkerson_graph *g) {
+
+	// we will check every edge from the current path and check for the rules of full-forward or empty-backward.
+	for(int i = 0; i < g->current_path_size-1; ++i) {
+		int is_foreward = is_foreward_flow(g, g->current_path[i], g->current_path[i+1]);
+		int capacity = get_capacity_value(g, g->current_path[i], g->current_path[i+1]);
+		int flow = get_flow_value(g, g->current_path[i], g->current_path[i+1]);
+
+		if(is_foreward && (flow == capacity))
+			return 0; // invalid path, there is a full-foreward transition
+		else if(!is_foreward && (flow == 0)) 
+			return 0; // invalid path, there is a empty-backward transition
+	}
+	return 1;
+}
+
+// retrives the smallest value from the current path, that has the smallest residual flow. Residual flow is CAPACITY-FLOW
+int get_bottleneck_from_current_path(ford_fulkerson_graph *g) {
+	int smallest_value = 0;
+	if(g->current_path_size > 1)
+		smallest_value = get_capacity_value(g,g->current_path[0],g->current_path[1]) - get_flow_value(g,g->current_path[0],g->current_path[1]);
+
+	for(int i = 0; i < g->current_path_size-1; ++i) {
+		int aux = get_capacity_value(g,g->current_path[i],g->current_path[i+1]) - get_flow_value(g,g->current_path[i],g->current_path[i+1]);
+		if(smallest_value > aux)
+			smallest_value = aux;
+	}
+	return smallest_value;
+}
+
+// recalculates the flow for each edge on the path and also sums the maximum flow value
+void apply_flow_to_current_path(ford_fulkerson_graph *g, int flow_value) {
+	for(int i = 0; i < g->current_path_size-1; ++i) {
+		int is_fw = is_foreward_flow(g, g->current_path[i],g->current_path[i+1]);
+		int aux = get_cost(g->edges_flow,g->n_vertices,g->current_path[i],g->current_path[i+1]);
+		if(is_fw)
+			set_cost(g->edges_flow,g->n_vertices,g->current_path[i],g->current_path[i+1],aux+flow_value);
+		else
+			set_cost(g->edges_flow,g->n_vertices,g->current_path[i],g->current_path[i+1],aux-flow_value);
+	}
+	g->max_capacity += flow_value;
 }
 
 void ford_fulkerson(ford_fulkerson_graph *g, int s, int t) {
 	
+	// skip this path, since it is already stalled, we dont want to check a path that has fullforeward or emptybackward transitions
+	if(!valid_path(g))
+		return;
+
 	if(s != t) { // while we havent reached the final destination
 		int adj_vert_count;
 		int *adj_vert = adjacent_vertices(g, s, &adj_vert_count); // get adjacent nodes to s
@@ -261,11 +328,28 @@ void ford_fulkerson(ford_fulkerson_graph *g, int s, int t) {
 
 		free (adj_vert);
 	} else {
+
+		// debug path simple
 		printf("\n\n");
 		for(int i = 0; i < g->current_path_size; ++i) {
 			printf("%d, ", g->current_path[i]);
 		}
+
+		// debug path with flow/capacity
+		printf("\n\n");
+		for(int i = 0; i < g->current_path_size; ++i) {
+			int curr_index = g->current_path[i];
+			int next_index = (i+1==g->current_path_size?0: g->current_path[i+1]);
+			printf("(%d)_%d/%d_>  ",g->current_path[i], get_cost(g->edges_flow,g->n_vertices,curr_index,next_index),
+													  get_cost(g->edges_capacities,g->n_vertices,curr_index,next_index));
+		}
+		printf("\n\n\n");
 		
+
+		// here is the logic for recalculating the flow!
+		int bottle_neck_of_current_path = get_bottleneck_from_current_path(g);
+		apply_flow_to_current_path(g, bottle_neck_of_current_path);
+
 	}
 }
 
@@ -275,10 +359,21 @@ int main(int argc, char *argv[]) {
 		printf("Usage: (string) FILE.CSV, (integer) index of vertice to start traveling, (integer) index of vertice to end traveling\n");
 
 	ford_fulkerson_graph *g = create_ford_fulkerson_graph(argv[1]);
-	
-	ford_fulkerson(g, atoi(argv[2]), atoi(argv[3]));
+	int s = atoi(argv[2]);
+	int t = atoi(argv[3]);
+
+	// the s is the beginning of the path
+	g->current_path[g->current_path_size] = s;
+	++g->current_path_size;
+
+	ford_fulkerson(g, s, t);
+
+	printf("program has finished, max capacity is %d", g->max_capacity);
 
 	destroy_ford_fulkerson_graph(g);
+
+	fflush(stdin);
+	getchar();
 }
 
 #ifdef __cplusplus

@@ -195,11 +195,14 @@ ford_fulkerson_graph *create_ford_fulkerson_graph(char *input_file) {
 }
 
 void destroy_ford_fulkerson_graph(ford_fulkerson_graph *g) {
-	free(g->vertices);
-	free(g->edges_capacities);
-	free(g->edges_flow);
-	free(g->vertices_visited);
-	free(g);
+	for(int i = 0; i < g->n_vertices; ++i)
+        free(g->vertices[i]);
+    free(g->vertices);
+    free(g->current_path);
+    free(g->edges_capacities);
+    free(g->edges_flow);
+    free(g->vertices_visited);
+    free(g);
 }
 
 int *adjacent_vertices(ford_fulkerson_graph *g, int vertex_index, int *n_adja) {
@@ -235,14 +238,14 @@ int is_foreward_flow(ford_fulkerson_graph *g, int a, int b) {
 // returns the capacity value, regardless the direction
 int get_capacity_value(ford_fulkerson_graph *g, int a, int b) {
 	int val = get_cost(g->edges_capacities,g->n_vertices,a,b);
-	if (val < 0)
+	if (val <= 0)
 		val = get_cost(g->edges_capacities,g->n_vertices,b,a);
 	return val;
 }
 // returns the flow value, regardless the direction
 int get_flow_value(ford_fulkerson_graph *g, int a, int b) {
 	int val = get_cost(g->edges_flow,g->n_vertices,a,b);
-	if (val < 0)
+	if (val <= 0)
 		val = get_cost(g->edges_flow,g->n_vertices,b,a);
 	return val;
 }
@@ -250,7 +253,7 @@ int get_flow_value(ford_fulkerson_graph *g, int a, int b) {
 // determinates if the current path is valid, in other words, if there is no forward full, or backward empty edges.
 int valid_path(ford_fulkerson_graph *g) {
 
-	// we will check every edge from the current path and check for the rules of full-forward or empty-backward.
+	// we will check every edge from the current path and check for thg->current_path[i+1]e rules of full-forward or empty-backward.
 	for(int i = 0; i < g->current_path_size-1; ++i) {
 		int is_foreward = is_foreward_flow(g, g->current_path[i], g->current_path[i+1]);
 		int capacity = get_capacity_value(g, g->current_path[i], g->current_path[i+1]);
@@ -264,18 +267,32 @@ int valid_path(ford_fulkerson_graph *g) {
 	return 1;
 }
 
+// this returns the value from a to b considering its direction, if its foreward,
+// the value is Capacity - Flow, otherwise, if its backwardflow, the value is the flow
+int get_residue_value_from_edge(ford_fulkerson_graph *g, int a, int b) {
+    
+    int is_foreward = is_foreward_flow(g,a,b);
+    int residue = -1;
+    
+    if(is_foreward)
+        residue = get_capacity_value(g,a,b) - get_flow_value(g,a,b);
+    else if (!is_foreward)
+        residue = get_flow_value(g,a,b);
+    return residue;      
+}
+
 // retrives the smallest value from the current path, that has the smallest residual flow. Residual flow is CAPACITY-FLOW
 int get_bottleneck_from_current_path(ford_fulkerson_graph *g) {
-	int smallest_value = 0;
-	if(g->current_path_size > 1)
-		smallest_value = get_capacity_value(g,g->current_path[0],g->current_path[1]) - get_flow_value(g,g->current_path[0],g->current_path[1]);
+    int smallest_value = -1;
+    if(g->current_path_size>1)
+        smallest_value = get_residue_value_from_edge(g,g->current_path[0],g->current_path[1]); // initialize it with a valid value
 
-	for(int i = 0; i < g->current_path_size-1; ++i) {
-		int aux = get_capacity_value(g,g->current_path[i],g->current_path[i+1]) - get_flow_value(g,g->current_path[i],g->current_path[i+1]);
-		if(smallest_value > aux)
-			smallest_value = aux;
-	}
-	return smallest_value;
+    for(int i = 0; i < g->current_path_size-1; ++i) {
+            int aux = get_residue_value_from_edge(g,g->current_path[i],g->current_path[i+1]);
+            if(smallest_value > aux)
+                    smallest_value = aux;
+    }
+    return smallest_value;
 }
 
 // recalculates the flow for each edge on the path and also sums the maximum flow value
@@ -318,8 +335,9 @@ void ford_fulkerson(ford_fulkerson_graph *g, int s, int t) {
 				ford_fulkerson(g,adj_vert[i], t);
 				//g->vertices_visited[adj_vert[i]] = 0; // unmark as visited
 
-				g->current_path[g->current_path_size] = -1; // make path available again
 				--g->current_path_size;
+				g->current_path[g->current_path_size] = -1; // make path available again
+				
 			}
 			
 		}
@@ -348,6 +366,8 @@ void ford_fulkerson(ford_fulkerson_graph *g, int s, int t) {
 
 		// here is the logic for recalculating the flow!
 		int bottle_neck_of_current_path = get_bottleneck_from_current_path(g);
+		printf("\nbottleneck is: %d\n\n", bottle_neck_of_current_path);
+
 		apply_flow_to_current_path(g, bottle_neck_of_current_path);
 
 	}
